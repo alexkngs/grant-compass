@@ -86,6 +86,7 @@ pip install -e .
 grantcompass init            # copies config.example.yaml -> config.local.yaml (gitignored)
 $EDITOR config.local.yaml    # country/countries (default: Europe), degree level(s), field, grade + scale
 
+export OPENALEX_API_KEY=...   # free key from https://help.openalex.org/api/authentication/
 grantcompass professors      # deterministic OpenReview + OpenAlex pass, no LLM (MS/PhD only)
 # program/funding listings need live web access, see "Inside Claude Code" below,
 # or fetch them yourself against src/grantcompass/sources.yaml into data/programs_raw.json
