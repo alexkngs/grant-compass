@@ -161,5 +161,6 @@
   region: Europe
   notes: >
     Used by professors.py to enrich last authors with h-index, works count,
-    and institution/country. Free, public, no key required (set a mailto in
-    the User-Agent per OpenAlex's polite-pool guidance if you extend this).
+    and institution/country. Free, but anonymous use shares a small daily
+    budget per IP; set OPENALEX_API_KEY (free key:
+    https://help.openalex.org/api/authentication/) to get your own budget.
