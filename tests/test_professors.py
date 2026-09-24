@@ -1,4 +1,6 @@
+import io
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -106,6 +108,35 @@ class TestOpenAlex(unittest.TestCase):
                                   return_value=_response(200, {"results": []})) as get:
             enrich_author("Doug Zytko")
         self.assertEqual(get.call_args.kwargs["headers"], {"Authorization": "Bearer k"})
+
+
+class TestRunWarnings(unittest.TestCase):
+    """The key can be injected by a proxy, so run() must not warn just because the env var is unset."""
+
+    def _run(self, enrich):
+        cfg = {"search": {"venues": ["CHI"]}, "applicant": {"field_keywords": ["design"]}}
+        stderr = io.StringIO()
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.dict("os.environ", {}, clear=True), \
+                mock.patch.object(professors, "_warned", set()), \
+                mock.patch.object(professors, "DATA_DIR", Path(tmp)), \
+                mock.patch.object(professors, "load_config", return_value=cfg), \
+                mock.patch.object(professors, "fetch_venue_papers", return_value=SEARCH_RESPONSE["notes"]), \
+                mock.patch.object(professors, "enrich_author", side_effect=enrich), \
+                mock.patch("sys.stderr", stderr):
+            records = professors.run()
+        return records, stderr.getvalue()
+
+    def test_no_warning_when_openalex_answers(self):
+        records, err = self._run(lambda name: {"name": name, "country_code": "AT"})
+        self.assertEqual(len(records), 1)
+        self.assertEqual(err, "")
+
+    def test_warns_with_key_hint_on_429(self):
+        records, err = self._run(RateLimited("HTTP 429"))
+        self.assertEqual(records, [])
+        self.assertIn("rate limit", err)
+        self.assertIn("OPENALEX_API_KEY", err)
 
 
 if __name__ == "__main__":
