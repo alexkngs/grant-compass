@@ -64,7 +64,7 @@ That's the whole answer. No "Great question!", no re-explaining what a scholarsh
 
 ```mermaid
 flowchart TD
-    A[Ask once: country, degree level,<br/>field, grade → config.local.yaml] --> B[grantcompass professors<br/>OpenReview → last author → OpenAlex<br/>skipped for Bachelor's-only]
+    A[Ask once: country, degree level,<br/>field, grade → config.local.yaml] --> B[grantcompass professors<br/>OpenReview + OpenAlex venues → last author → OpenAlex<br/>skipped for Bachelor's-only]
     A --> C[Claude WebSearch/WebFetch<br/>aggregator platforms first, then<br/>single-scheme sources in sources.yaml]
     B --> D[data/professors_raw.json]
     C --> E[data/programs_raw.json]
@@ -113,7 +113,8 @@ src/grantcompass/
                   # (Scholarshipportal/Bachelorsportal/Mastersportal/PhDportal/European Funding
                   # Guide) first, then DAAD, Erasmus/Erasmus Mundus, MSCA, EURAXESS, national
                   # schemes, national job boards
-  professors.py   # OpenReview -> last author -> OpenAlex enrichment -> filtered to Europe
+  professors.py   # OpenReview (ML/robotics) + OpenAlex (design research: Design Studies, DRS, ...)
+                  # -> last author -> OpenAlex enrichment -> filtered to Europe
   score.py        # grade-eligibility + keyword-match scoring, pure functions, unit tested, no I/O beyond JSON
   report.py       # scored.json -> output/report.md (compact) + output/full_results.csv (complete)
   cli.py          # `grantcompass init|professors|score|report`

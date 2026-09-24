@@ -22,6 +22,17 @@ search:
     - ICRA
     - IROS
     - NeurIPS
+  openalex_venues:                  # venues OpenReview doesn't host (design research), queried via OpenAlex by source id.
+                                    # Pick ids with papers in `years`: OpenAlex has no CHI works after 2022 or DIS after 2024.
+    - {name: Design Studies, id: S152445846}
+    - {name: The Design Journal, id: S153469747}
+    - {name: CoDesign, id: S4210189112}
+    - {name: She Ji, id: S2898472644}
+    - {name: Design Issues, id: S107659597}
+    - {name: Design Science, id: S4210173131}
+    - {name: DRS, id: S4220651532}              # Proceedings of DRS (Design Research Society)
+    - {name: Design Society, id: S4210205958}   # Proceedings of the Design Society (ICED, DESIGN conferences)
+    - {name: Nordes, id: S4393917623}           # Nordic Design Research Conference
   max_papers_per_venue: 50
   years: [2025, 2026]
 

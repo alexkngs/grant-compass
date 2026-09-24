@@ -3,6 +3,11 @@ Deterministic PI-discovery pipeline: OpenReview accepted papers -> last author
 (flagged as likely PI) -> OpenAlex enrichment (institution, country, h-index) ->
 filtered to Europe -> data/professors_raw.json.
 
+Venues OpenReview doesn't host (design research venues such as Design Studies,
+DRS, She Ji) are listed under search.openalex_venues by OpenAlex source id; their
+papers come from OpenAlex's works endpoint, whose last authorship already names
+the author's OpenAlex id, so enrichment is an exact id lookup, not a name search.
+
 Clean-room design note: this reimplements the *concept* of arjunk00/phd-finder
 (OpenReview -> last-author -> citation-metrics) using only OpenReview's and
 OpenAlex's public, ToS-permitted REST APIs. No code from that repo (which
@@ -24,6 +29,8 @@ from .config import load_config
 OPENREVIEW_API = "https://api2.openreview.net/notes/search"
 OPENREVIEW_MAX_LIMIT = 500  # larger limits come back empty
 OPENALEX_API = "https://api.openalex.org/authors"
+OPENALEX_WORKS_API = "https://api.openalex.org/works"
+OPENALEX_MAX_PER_PAGE = 200
 OPENALEX_KEY_ENV = "OPENALEX_API_KEY"
 EUROPEAN_COUNTRY_CODES = {
     "DE", "FR", "NL", "CH", "SE", "NO", "FI", "DK", "IT", "ES", "PT", "AT",
@@ -138,12 +145,51 @@ def _openalex_headers() -> dict:
     return {"Authorization": f"Bearer {key}"} if key else {}
 
 
+def fetch_openalex_venue_works(source_id: str, keyword: str, years: list, max_papers: int) -> list[dict]:
+    """Search one OpenAlex source (journal/conference) for works matching keyword. Raises RateLimited on 429."""
+    source_id = source_id.rsplit("/", 1)[-1]
+    filters = [f"primary_location.source.id:{source_id}"]
+    if years:
+        filters.append("publication_year:" + "|".join(str(y) for y in years))
+    params = {
+        "filter": ",".join(filters),
+        "per_page": min(max_papers, OPENALEX_MAX_PER_PAGE),
+        "select": "title,authorships",
+    }
+    if keyword:
+        params["search"] = keyword
+    data = _get(OPENALEX_WORKS_API, params, headers=_openalex_headers())
+    if not data:
+        return []
+    return data.get("results", [])
+
+
+def last_authorship_of(work: dict) -> dict | None:
+    """Last author of an OpenAlex work as {"name", "id"}, or None if it has no identified authors."""
+    authorships = work.get("authorships") or []
+    if not authorships:
+        return None
+    author = authorships[-1].get("author") or {}
+    if not author.get("id") or not author.get("display_name"):
+        return None
+    return {"name": author["display_name"], "id": author["id"]}
+
+
+def enrich_author_by_id(author_id: str) -> dict | None:
+    """Fetch one OpenAlex author by id. Raises RateLimited on HTTP 429."""
+    a = _get(f"{OPENALEX_API}/{author_id.rsplit('/', 1)[-1]}", {}, headers=_openalex_headers())
+    return _author_record(a, a.get("display_name")) if a else None
+
+
 def enrich_author(name: str) -> dict | None:
     """Look up name on OpenAlex. Raises RateLimited on HTTP 429."""
     data = _get(OPENALEX_API, {"search": name, "per_page": 1}, headers=_openalex_headers())
     if not data or not data.get("results"):
         return None
-    a = data["results"][0]
+    return _author_record(data["results"][0], name)
+
+
+def _author_record(a: dict, name: str) -> dict:
     inst = (a.get("last_known_institutions") or [{}])[0]
     country = inst.get("country_code")
     return {
@@ -156,51 +202,54 @@ def enrich_author(name: str) -> dict | None:
     }
 
 
+def _paper_candidates(search_cfg: dict, keywords: list):
+    """Yield (venue, author_name, openalex_author_id | None, paper_title) across both paper sources."""
+    max_papers = search_cfg.get("max_papers_per_venue", 50)
+    for venue in search_cfg.get("venues") or []:
+        for kw in keywords or [venue]:
+            term = f"{venue} {kw}".strip()
+            for paper in fetch_venue_papers(term, max_papers):
+                if paper_matches_venue(paper, venue):
+                    yield venue, last_author_of(paper), None, _content_value(paper, "title")
+    for venue in search_cfg.get("openalex_venues") or []:
+        for kw in keywords or [""]:
+            for work in fetch_openalex_venue_works(venue["id"], kw, search_cfg.get("years") or [], max_papers):
+                author = last_authorship_of(work)
+                if author:
+                    yield venue["name"], author["name"], author["id"], work.get("title")
+
+
 def run() -> list[dict]:
     cfg = load_config()
     search_cfg = cfg.get("search", {})
-    venues = search_cfg.get("venues", [])
-    max_papers = search_cfg.get("max_papers_per_venue", 50)
     keywords = cfg.get("applicant", {}).get("field_keywords", [])
 
     records = []
     seen_authors = set()
     candidates = 0
-    rate_limited = False
-    for venue in venues:
-        if rate_limited:
-            break
-        for kw in keywords or [venue]:
-            if rate_limited:
-                break
-            term = f"{venue} {kw}".strip()
-            for paper in fetch_venue_papers(term, max_papers):
-                if not paper_matches_venue(paper, venue):
-                    continue
-                author = last_author_of(paper)
-                if not author or author in seen_authors:
-                    continue
-                seen_authors.add(author)
-                candidates += 1
-                try:
-                    enriched = enrich_author(author)
-                except RateLimited as exc:
-                    # The key may also be injected by a proxy, so only hint about it once OpenAlex refuses.
-                    hint = "" if os.environ.get(OPENALEX_KEY_ENV) else (
-                        f" Set {OPENALEX_KEY_ENV} (free key: https://help.openalex.org/api/authentication/).")
-                    _warn("openalex-429", f"OpenAlex rate limit hit, stopping enrichment: {exc}.{hint}")
-                    rate_limited = True
-                    break
-                if not enriched:
-                    continue
-                if enriched.get("country_code") not in EUROPEAN_COUNTRY_CODES:
-                    continue
-                enriched["source_venue"] = venue
-                enriched["source_paper_title"] = _content_value(paper, "title")
-                records.append(enriched)
+    try:
+        for venue, author, author_id, title in _paper_candidates(search_cfg, keywords):
+            if not author or (author_id or author) in seen_authors:
+                continue
+            seen_authors.add(author_id or author)
+            candidates += 1
+            enriched = enrich_author_by_id(author_id) if author_id else enrich_author(author)
+            if not enriched:
+                continue
+            if enriched.get("country_code") not in EUROPEAN_COUNTRY_CODES:
+                continue
+            enriched["source_venue"] = venue
+            enriched["source_paper_title"] = title
+            records.append(enriched)
+    except RateLimited as exc:
+        # The key may also be injected by a proxy, so only hint about it once OpenAlex refuses.
+        hint = "" if os.environ.get(OPENALEX_KEY_ENV) else (
+            f" Set {OPENALEX_KEY_ENV} (free key: https://help.openalex.org/api/authentication/).")
+        _warn("openalex-429", f"OpenAlex rate limit hit, stopping enrichment: {exc}.{hint}")
 
     if not candidates:
-        _warn("no-candidates", f"no OpenReview papers with authors matched venues {venues} "
+        venues = search_cfg.get("venues", []) + [v["name"] for v in search_cfg.get("openalex_venues") or []]
+        _warn("no-candidates", f"no papers with authors matched venues {venues} "
               f"and keywords {keywords}")
 
     DATA_DIR.mkdir(exist_ok=True)
