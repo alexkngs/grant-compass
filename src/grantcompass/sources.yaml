@@ -161,6 +161,8 @@
   region: Europe
   notes: >
     Used by professors.py to enrich last authors with h-index, works count,
-    and institution/country. Free, but anonymous use shares a small daily
+    and institution/country, and to pull papers from venues OpenReview doesn't
+    host (design research: Design Studies, DRS, She Ji...; see
+    search.openalex_venues in config.example.yaml). Free, but anonymous use shares a small daily
     budget per IP; set OPENALEX_API_KEY (free key:
     https://help.openalex.org/api/authentication/) to get your own budget.
