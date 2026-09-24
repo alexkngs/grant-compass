@@ -163,10 +163,6 @@ def run() -> list[dict]:
     max_papers = search_cfg.get("max_papers_per_venue", 50)
     keywords = cfg.get("applicant", {}).get("field_keywords", [])
 
-    if not os.environ.get(OPENALEX_KEY_ENV):
-        _warn("openalex-key", f"{OPENALEX_KEY_ENV} is not set; OpenAlex allows only a small shared "
-              "anonymous daily budget. Get a free key: https://help.openalex.org/api/authentication/")
-
     records = []
     seen_authors = set()
     candidates = 0
@@ -189,7 +185,9 @@ def run() -> list[dict]:
                 try:
                     enriched = enrich_author(author)
                 except RateLimited as exc:
-                    hint = "" if os.environ.get(OPENALEX_KEY_ENV) else f" Set {OPENALEX_KEY_ENV}."
+                    # The key may also be injected by a proxy, so only hint about it once OpenAlex refuses.
+                    hint = "" if os.environ.get(OPENALEX_KEY_ENV) else (
+                        f" Set {OPENALEX_KEY_ENV} (free key: https://help.openalex.org/api/authentication/).")
                     _warn("openalex-429", f"OpenAlex rate limit hit, stopping enrichment: {exc}.{hint}")
                     rate_limited = True
                     break
